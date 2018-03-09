@@ -56,6 +56,8 @@
 //     http://www.om-db.wi.tum.de/psplib/data.html
 //   - rcpsp problem in the patterson format (.rcp):
 //     http://www.om-db.wi.tum.de/psplib/dataob.html
+//   - rcpsp/t (.smt):
+//     http://www.om-db.wi.tum.de/psplib/newinstances.html
 //   - rcpsp/max (.sch):
 //     https://www.wiwi.tu-clausthal.de/de/abteilungen/produktion/forschung/
 //           schwerpunkte/project-generator/rcpspmax/
@@ -88,6 +90,14 @@ message Resource {
 
   // If non zero, then each unit of capacity will incur a cost of unit_cost.
   int32 unit_cost = 4;
+
+  // This field is used only in the rcpsp/t case. It stores the available
+  // capacity of the resource at each time point.
+  repeated int32 capacity_at = 5;
+}
+
+message PerTimeDemands {
+  repeated int32 demands_at = 1;
 }
 
 message Recipe {
@@ -98,7 +108,9 @@ message Recipe {
   // it can be < 0. Note that in this case, the tasks always have a duration
   // of zero. Thus the effect of the demand (increase or decrease of the
   // current usage) happens at the start of the task.
-  repeated int32 demands = 2;
+  // In the rcpsp/t case, demand is time-varying, and given for each time point
+  // of its duration.
+  repeated PerTimeDemands demands = 2;
 
   // This parallel list indicates which resource index (in the main problem)
   // the above demand corresponds to.
@@ -137,22 +149,23 @@ message RcpspProblem {
   bool is_consumer_producer = 3;
   bool is_resource_investment = 4;
   bool is_rcpsp_max = 5;
+  bool is_rcpsp_t = 6;
   // If set, it defines a strict date, and each task must finish before this.
-  int32 deadline = 6;
+  int32 deadline = 7;
   // Additional info stored in the source file.
   // The horizon is a date where we are sure that all tasks can fit before it.
-  int32 horizon = 7;
+  int32 horizon = 8;
   // The release date is defined in the rcpsp base format, but is not used.
-  int32 release_date = 8;
+  int32 release_date = 9;
   // The tardiness cost is defined in the rcpsp base format, but is not used.
-  int32 tardiness_cost = 9;
+  int32 tardiness_cost = 10;
   // The mpm_time is defined in the rcpsp base format, but is not used.
   // It is defined as the minimum makespan in case of interruptible tasks.
-  int32 mpm_time = 10;
+  int32 mpm_time = 11;
   // Data used by the problem generator.
-  int64 seed = 11;
-  string basedata = 12;
+  int64 seed = 12;
+  string basedata = 13;
   // The due date is defined in the rcpsp base format, but is not used.
-  int32 due_date = 13;
-  string name = 14;
+  int32 due_date = 14;
+  string name = 15;
 }

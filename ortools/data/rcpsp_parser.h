@@ -57,6 +57,7 @@ class RcpspParser {
   };
 
   void ProcessRcpspLine(const std::string& line);
+  void ProcessRcpspTLine(const std::string& line);
   void ProcessPattersonLine(const std::string& line);
   void ProcessRcpspMaxLine(const std::string& line);
   void ReportError(const std::string& line);

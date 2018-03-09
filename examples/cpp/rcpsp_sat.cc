@@ -111,7 +111,7 @@ void LoadAndSolve(const std::string& file_name) {
 
       // Add intervals to the resources.
       for (int i = 0; i < recipe.demands_size(); ++i) {
-        const int demand = recipe.demands(i);
+        const int demand = recipe.demands(i).demands_at(0);
         const int res = recipe.resources(i);
 
         consumptions_per_resources[res].push_back(demand);
@@ -140,7 +140,7 @@ void LoadAndSolve(const std::string& file_name) {
             model.Add(NewIntegerVariableFromLiteral(is_present));
 
         for (int i = 0; i < recipe.demands_size(); ++i) {
-          const int demand = recipe.demands(i);
+          const int demand = recipe.demands(i).demands_at(0);
           const int res = recipe.resources(i);
 
           consumptions_per_resources[res].push_back(demand);

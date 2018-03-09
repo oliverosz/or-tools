@@ -44,6 +44,7 @@ bool RcpspParser::ParseFile(const std::string& file_name) {
   const bool is_rcpsp_max = strings::EndsWith(file_name, ".sch") ||
                             strings::EndsWith(file_name, ".SCH");
   const bool is_patterson = strings::EndsWith(file_name, ".rcp");
+  const bool is_rcpsp_t = strings::EndsWith(file_name, ".smt");
   load_status_ = HEADER_SECTION;
 
   for (const std::string& line : FileLines(file_name)) {
@@ -51,6 +52,8 @@ bool RcpspParser::ParseFile(const std::string& file_name) {
       ProcessRcpspMaxLine(line);
     } else if (is_patterson) {
       ProcessPattersonLine(line);
+    } else if (is_rcpsp_t) {
+      ProcessRcpspTLine(line);
     } else {
       ProcessRcpspLine(line);
     }
@@ -198,7 +201,7 @@ void RcpspParser::ProcessRcpspLine(const std::string& line) {
         for (int i = 0; i < rcpsp_.resources_size(); ++i) {
           const int demand = atoi32(words[3 + i]);
           if (demand != 0) {
-            recipe->add_demands(demand);
+            recipe->add_demands()->add_demands_at(demand);
             recipe->add_resources(i);
           }
         }
@@ -212,7 +215,7 @@ void RcpspParser::ProcessRcpspLine(const std::string& line) {
         for (int i = 0; i < rcpsp_.resources_size(); ++i) {
           const int demand = atoi32(words[2 + i]);
           if (demand != 0) {
-            recipe->add_demands(demand);
+            recipe->add_demands()->add_demands_at(demand);
             recipe->add_resources(i);
           }
         }
@@ -245,6 +248,99 @@ void RcpspParser::ProcessRcpspLine(const std::string& line) {
       break;
     }
     case ERROR_FOUND: {
+      break;
+    }
+  }
+}
+
+void RcpspParser::ProcessRcpspTLine(const std::string& line) {
+  if (strings::StartsWith(line, "***")) return;
+  if (strings::StartsWith(line, "---")) return;
+
+  const std::vector<std::string> words =
+      absl::StrSplit(line, AnyOf(" :\t\r"), absl::SkipEmpty());
+  if (words.empty()) return;
+
+  switch (load_status_) {
+    case NOT_STARTED:
+    case HEADER_SECTION:
+    case PROJECT_SECTION:
+    case INFO_SECTION:
+    case PRECEDENCE_SECTION:
+    case RESOURCE_MIN_SECTION:
+    case PARSING_FINISHED:
+    case ERROR_FOUND: {
+      ProcessRcpspLine(line);
+      break;
+    }
+    case REQUEST_SECTION: {
+      if (words[0] == "jobnr.") {
+        // Nothing to do.
+      } else if (words[0] == "RESOURCEAVAILABILITIES" ||
+                 (words[0] == "RESOURCE" && words[1] == "AVAILABILITIES")) {
+        load_status_ = RESOURCE_SECTION;
+        unreads_ = rcpsp_.resources_size();
+      } else if (unreads_ == 0) {
+        // Start of a new task (index is 0-based for us).
+        current_task_ = atoi32(words[0]) - 1;
+        const int current_recipe = atoi32(words[1]) - 1;
+        if (current_recipe != 0) {
+          ReportError(line);
+          break;
+        }
+        Recipe* const recipe =
+            rcpsp_.mutable_tasks(current_task_)->add_recipes();
+        const int duration = atoi32(words[2]);
+        recipe->set_duration(duration);
+        recipe->add_resources(0);
+        PerTimeDemands* const demands = recipe->add_demands();
+        CHECK_EQ(words.size(), 3 + duration);
+        for (int i = 0; i < duration; ++i) {
+          demands->add_demands_at(atoi32(words[3 + i]));
+        }
+        if (duration > 0) {
+          unreads_ = rcpsp_.resources_size() - 1;
+        } else {
+          unreads_ = 0;
+        }
+      } else {
+        // New demand vector for the current task (single-mode).
+        CHECK_EQ(words.size(),
+                 rcpsp_.tasks(current_task_).recipes(0).duration());
+        Recipe* const recipe =
+            rcpsp_.mutable_tasks(current_task_)->mutable_recipes(0);
+        recipe->add_resources(recipe->resources_size());
+        PerTimeDemands* const demands = recipe->add_demands();
+        for (int i = 0; i < recipe->duration(); ++i) {
+          demands->add_demands_at(atoi32(words[i]));
+        }
+        unreads_--;
+        CHECK_GE(unreads_, 0);
+      }
+      break;
+    }
+    case RESOURCE_SECTION: {
+      if (words.size() == 2 * rcpsp_.resources_size() && words[0] == "R") {
+        // Nothing to do.
+      } else if (words.size() == rcpsp_.horizon()) {
+        CHECK_GE(unreads_, 0);
+        CHECK_LE(unreads_, rcpsp_.resources_size());
+        Resource* const resource =
+            rcpsp_.mutable_resources(rcpsp_.resources_size() - unreads_);
+        for (int i = 0; i < words.size(); ++i) {
+          const int current_capacity = atoi32(words[i]);
+          resource->add_capacity_at(current_capacity);
+          if (current_capacity > resource->max_capacity()) {
+            resource->set_max_capacity(current_capacity);
+          }
+        }
+        unreads_--;
+        if (unreads_ == 0) {
+          load_status_ = PARSING_FINISHED;
+        }
+      } else {
+        ReportError(line);
+      }
       break;
     }
   }
@@ -394,7 +490,7 @@ void RcpspParser::ProcessRcpspMaxLine(const std::string& line) {
         for (int i = 0; i < rcpsp_.resources_size(); ++i) {
           const int demand = atoi32(words[3 + i]);
           if (demand != 0) {
-            recipe->add_demands(demand);
+            recipe->add_demands()->add_demands_at(demand);
             recipe->add_resources(i);
           }
         }
@@ -416,7 +512,7 @@ void RcpspParser::ProcessRcpspMaxLine(const std::string& line) {
         for (int i = 0; i < rcpsp_.resources_size(); ++i) {
           const int demand = atoi32(words[2 + i]);
           if (demand != 0) {
-            recipe->add_demands(demand);
+            recipe->add_demands()->add_demands_at(demand);
             recipe->add_resources(i);
           }
         }
@@ -430,7 +526,7 @@ void RcpspParser::ProcessRcpspMaxLine(const std::string& line) {
         for (int i = 0; i < rcpsp_.resources_size(); ++i) {
           const int demand = atoi32(words[2 + i]);
           if (demand != 0) {
-            recipe->add_demands(demand);
+            recipe->add_demands()->add_demands_at(demand);
             recipe->add_resources(i);
           }
         }
@@ -541,7 +637,7 @@ void RcpspParser::ProcessPattersonLine(const std::string& line) {
         for (int i = 1; i <= num_resources; ++i) {
           const int demand = atoi32(words[i]);
           if (demand != 0) {
-            recipe->add_demands(demand);
+            recipe->add_demands()->add_demands_at(demand);
             recipe->add_resources(i - 1);
           }
         }
