@@ -172,9 +172,6 @@ ifeq ($(SYSTEM),win)
     CMAKE_PLATFORM = "Visual Studio $(VISUAL_STUDIO_MAJOR) $(VISUAL_STUDIO_YEAR) $(CMAKE_SUFFIX)"
   endif
 
-  # Third party specific
-  CBC_PLATFORM = $(CBC_PLATFORM_PREFIX)-$(VS_RELEASE)-Release
-
   # Java specific
   ifeq ($(JAVA_HOME),)
     SELECTED_PATH_TO_JDK = JAVA_HOME = \# JAVA_HOME is not set on your system. Set it to the path to jdk to build the java files.

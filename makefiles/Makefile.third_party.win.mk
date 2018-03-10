@@ -13,6 +13,18 @@ ZLIB_TAG = 1.2.11
 ZLIB_ARCHIVE_TAG = 1211
 SWIG_TAG = 3.0.12
 
+ifeq ("$(WINDOWS_MDd)","MDd")
+  CBC_PLATFORM = $(CBC_PLATFORM_PREFIX)-$(VS_RELEASE)-Debug
+  ZLIB_LOC = LOC=-MDd
+  CMAKE_BUILD_TYPE = Debug
+  MSBUILD_TYPE = Debug
+else
+  CBC_PLATFORM = $(CBC_PLATFORM_PREFIX)-$(VS_RELEASE)-Release
+  ZLIB_LOC =
+  CMAKE_BUILD_TYPE = Release
+  MSBUILD_TYPE = Release
+endif
+
 # Added in support of clean third party targets
 TSVNCACHE_EXE = TSVNCache.exe
 
@@ -220,7 +232,7 @@ dependencies/install/include/zconf.h: dependencies/install/include dependencies/
 	$(COPY) dependencies$Ssources$Szlib-$(ZLIB_TAG)$Szconf.h dependencies$Sinstall$Sinclude$Szconf.h
 
 dependencies/install/lib/zlib.lib: dependencies/sources/zlib-$(ZLIB_TAG)/zlib.h
-	cd dependencies$Ssources$Szlib-$(ZLIB_TAG) && set MAKEFLAGS= && nmake -f win32$SMakefile.msc zlib.lib
+	cd dependencies$Ssources$Szlib-$(ZLIB_TAG) && set MAKEFLAGS= && nmake -f win32$SMakefile.msc $(ZLIB_LOC) zlib.lib
 	$(COPY) dependencies$Ssources$Szlib-$(ZLIB_TAG)$Szlib.lib dependencies$Sinstall$Slib
 
 dependencies/sources/zlib-$(ZLIB_TAG)/zlib.h: dependencies/archives/zlib$(ZLIB_ARCHIVE_TAG).zip
@@ -236,7 +248,7 @@ dependencies/install/lib/gflags.lib: dependencies/sources/gflags-$(GFLAGS_TAG)/I
 	-mkdir dependencies\sources\gflags-$(GFLAGS_TAG)\build_cmake
 	cd dependencies\sources\gflags-$(GFLAGS_TAG)\build_cmake && set MAKEFLAGS= && \
 	  "$(CMAKE)" -D CMAKE_INSTALL_PREFIX=..\..\..\install \
-	           -D CMAKE_BUILD_TYPE=Release \
+	           -D CMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
 	           -G "NMake Makefiles" \
 	           ..
 	cd dependencies\sources\gflags-$(GFLAGS_TAG)\build_cmake && set MAKEFLAGS= && \
@@ -255,12 +267,12 @@ dependencies/archives/gflags-$(GFLAGS_TAG).zip:
 # Install protocol buffers.
 install_protobuf: dependencies\install\bin\protoc.exe  dependencies\install\include\google\protobuf\message.h
 
-dependencies\install\bin\protoc.exe: dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\Release\protoc.exe
-	copy dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\Release\protoc.exe dependencies\install\bin
-	copy dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\Release\*.lib dependencies\install\lib
+dependencies\install\bin\protoc.exe: dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\$(CMAKE_BUILD_TYPE)\protoc.exe
+	copy dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\$(CMAKE_BUILD_TYPE)\protoc.exe dependencies\install\bin
+	copy dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\$(CMAKE_BUILD_TYPE)\*.lib dependencies\install\lib
 
-dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\Release\protoc.exe: dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\protobuf.sln
-	cd dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build && msbuild protobuf.sln /t:Build /p:Configuration=Release;LinkIncremental=false
+dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\$(CMAKE_BUILD_TYPE)\protoc.exe: dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\protobuf.sln
+	cd dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build && msbuild protobuf.sln /t:Build /p:Configuration=$(CMAKE_BUILD_TYPE);LinkIncremental=false
 
 dependencies\install\include\google\protobuf\message.h: dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\include.tar
 	cd dependencies\install && ..\..\tools\tar.exe xvmf ..\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\include.tar
@@ -285,7 +297,7 @@ dependencies/install/include/glog/logging.h: dependencies/sources/glog-$(GLOG_TA
 	-md dependencies\sources\glog-$(GLOG_TAG)\build_cmake
 	cd dependencies\sources\glog-$(GLOG_TAG)\build_cmake && \
 	  "$(CMAKE)" -D CMAKE_INSTALL_PREFIX=..\..\..\install \
-	           -D CMAKE_BUILD_TYPE=Release \
+	           -D CMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
 	           -D CMAKE_PREFIX_PATH="$(OR_TOOLS_TOP)\dependencies\install" \
 	           -G "NMake Makefiles" \
 	           ..
@@ -329,7 +341,7 @@ dependencies\sources\Cbc-$(CBC_TAG)\Cbc\MSVisualStudio\v10\$(CBC_PLATFORM)\cbc.e
 	tools\upgrade_vs_project.cmd dependencies\\sources\\Cbc-$(CBC_TAG)\\CoinUtils\\MSVisualStudio\\v10\\libCoinUtils\\libCoinUtils.vcxproj $(VS_RELEASE)
 	tools\upgrade_vs_project.cmd dependencies\\sources\\Cbc-$(CBC_TAG)\\Cgl\\MSVisualStudio\\v10\\libCgl\\libCgl.vcxproj $(VS_RELEASE)
 	tools\sed -i 's/CBC_BUILD;/CBC_BUILD;CBC_THREAD_SAFE;CBC_NO_INTERRUPT;/g' dependencies\\sources\\Cbc-$(CBC_TAG)\\Cbc\\MSVisualStudio\\v10\\libCbcSolver\\libCbcSolver.vcxproj
-	cd dependencies\sources\Cbc-$(CBC_TAG)\Cbc\MSVisualStudio\v10 && msbuild Cbc.sln /t:cbc /p:Configuration=Release;BuildCmd=ReBuild
+	cd dependencies\sources\Cbc-$(CBC_TAG)\Cbc\MSVisualStudio\v10 && msbuild Cbc.sln /t:cbc /p:Configuration=$(MSBUILD_TYPE);BuildCmd=ReBuild
 
 CBC_ARCHIVE:=https://www.coin-or.org/download/source/Cbc/Cbc-${CBC_TAG}.zip
 
@@ -407,3 +419,5 @@ Makefile.local: makefiles/Makefile.third_party.$(SYSTEM).mk
 	@echo # Define WINDOWS_ZLIB_DIR, WINDOWS_ZLIB_NAME, WINDOWS_GFLAGS_DIR, >> Makefile.local
 	@echo # WINDOWS_PROTOBUF_DIR, WINDOWS_GLOG_DIR, WINDOWS_SWIG_BINARY, >> Makefile.local
 	@echo # WINDOWS_CLP_DIR, WINDOWS_CBC_DIR if you wish to use a custom version >> Makefile.local
+ 	@echo WINDOWS_PYTHON_PATH = \# Please define WINDOWS_PYTHON_PATH (c:\\python27 by default)>> Makefile.local
+ 	@echo WINDOWS_MDd = \# Please define this to be "MDd" if you want to build a debug version linked against the /MDd runtime libraries. >> Makefile.local
