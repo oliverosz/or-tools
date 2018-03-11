@@ -43,6 +43,8 @@ bool RcpspParser::ParseFile(const std::string& file_name) {
       absl::EndsWith(file_name, ".sch") || absl::EndsWith(file_name, ".SCH");
   const bool is_patterson = absl::EndsWith(file_name, ".rcp");
   const bool is_rcpsp_t = absl::EndsWith(file_name, ".smt");
+  rcpsp_.set_is_rcpsp_max(is_rcpsp_max);
+  rcpsp_.set_is_rcpsp_t(is_rcpsp_t);
   load_status_ = HEADER_SECTION;
 
   for (const std::string& line : FileLines(file_name)) {
@@ -359,7 +361,6 @@ void RcpspParser::ProcessRcpspMaxLine(const std::string& line) {
       break;
     }
     case HEADER_SECTION: {
-      rcpsp_.set_is_rcpsp_max(true);
       if (words.size() == 2) {
         rcpsp_.set_is_consumer_producer(true);
       } else if (words.size() < 4 || atoi32(words[3]) != 0) {
