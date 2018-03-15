@@ -42,7 +42,8 @@ bool RcpspParser::ParseFile(const std::string& file_name) {
   const bool is_rcpsp_max =
       absl::EndsWith(file_name, ".sch") || absl::EndsWith(file_name, ".SCH");
   const bool is_patterson = absl::EndsWith(file_name, ".rcp");
-  const bool is_rcpsp_t = absl::EndsWith(file_name, ".smt");
+  const bool is_rcpsp_t = absl::EndsWith(file_name, ".smt") ||
+                          absl::EndsWith(file_name, ".mmt");
   rcpsp_.set_is_rcpsp_max(is_rcpsp_max);
   rcpsp_.set_is_rcpsp_t(is_rcpsp_t);
   load_status_ = HEADER_SECTION;
@@ -286,34 +287,56 @@ void RcpspParser::ProcessRcpspTLine(const std::string& line) {
         load_status_ = RESOURCE_SECTION;
         unreads_ = rcpsp_.resources_size();
       } else if (unreads_ == 0) {
-        // Start of a new task (index is 0-based for us).
-        current_task_ = atoi32(words[0]) - 1;
-        const int current_recipe = atoi32(words[1]) - 1;
-        if (current_recipe != 0) {
-          ReportError(line);
-          break;
-        }
-        Recipe* const recipe =
-            rcpsp_.mutable_tasks(current_task_)->add_recipes();
-        const int duration = atoi32(words[2]);
-        recipe->set_duration(duration);
-        recipe->add_resources(0);
-        PerTimeDemands* const demands = recipe->add_demands();
-        CHECK_EQ(words.size(), 3 + duration);
-        for (int i = 0; i < duration; ++i) {
-          demands->add_demands_at(atoi32(words[3 + i]));
-        }
-        if (duration > 0) {
-          unreads_ = rcpsp_.resources_size() - 1;
+        if (current_task_ == -1 || rcpsp_.tasks(current_task_).recipes_size() ==
+            recipe_sizes_[current_task_]) {
+          // Start of a new task (index is 0-based for us).
+          current_task_ = atoi32(words[0]) - 1;
+          const int current_recipe = atoi32(words[1]) - 1;
+          if (current_recipe != 0) {
+            ReportError(line);
+            break;
+          }
+          Recipe* const recipe =
+              rcpsp_.mutable_tasks(current_task_)->add_recipes();
+          const int duration = atoi32(words[2]);
+          recipe->set_duration(duration);
+          recipe->add_resources(0);
+          PerTimeDemands* const demands = recipe->add_demands();
+          CHECK_EQ(words.size(), 3 + duration);
+          for (int i = 0; i < duration; ++i) {
+            demands->add_demands_at(atoi32(words[3 + i]));
+          }
+          if (duration > 0) {
+            unreads_ = rcpsp_.resources_size() - 1;
+          } else {
+            unreads_ = 0;
+          }
         } else {
-          unreads_ = 0;
+          // New recipe for a current task.
+          const int current_recipe = atoi32(words[0]) - 1;
+          CHECK_EQ(current_recipe, rcpsp_.tasks(current_task_).recipes_size());
+          Recipe* const recipe =
+              rcpsp_.mutable_tasks(current_task_)->add_recipes();
+          const int duration = atoi32(words[1]);
+          recipe->set_duration(duration);
+          recipe->add_resources(0);
+          PerTimeDemands* const demands = recipe->add_demands();
+          CHECK_EQ(words.size(), 2 + duration);
+          for (int i = 0; i < duration; ++i) {
+            demands->add_demands_at(atoi32(words[2 + i]));
+          }
+          if (duration > 0) {
+            unreads_ = rcpsp_.resources_size() - 1;
+          } else {
+            unreads_ = 0;
+          }
         }
       } else {
-        // New demand vector for the current task (single-mode).
-        CHECK_EQ(words.size(),
-                 rcpsp_.tasks(current_task_).recipes(0).duration());
-        Recipe* const recipe =
-            rcpsp_.mutable_tasks(current_task_)->mutable_recipes(0);
+        // New demand vector for the current recipe.
+        const int current_recipe = rcpsp_.tasks(current_task_).recipes_size()-1;
+        Recipe* const recipe = rcpsp_.mutable_tasks(current_task_)
+            ->mutable_recipes(current_recipe);
+        CHECK_EQ(words.size(), recipe->duration());
         recipe->add_resources(recipe->resources_size());
         PerTimeDemands* const demands = recipe->add_demands();
         for (int i = 0; i < recipe->duration(); ++i) {
@@ -325,26 +348,34 @@ void RcpspParser::ProcessRcpspTLine(const std::string& line) {
       break;
     }
     case RESOURCE_SECTION: {
-      if (words.size() == 2 * rcpsp_.resources_size() && words[0] == "R") {
+      if (words.size() == 2 * rcpsp_.resources_size() &&
+          (words[0] == "R" || words[0] == "N")) {
         // Nothing to do.
-      } else if (words.size() == rcpsp_.horizon()) {
+      } else {
         CHECK_GE(unreads_, 0);
         CHECK_LE(unreads_, rcpsp_.resources_size());
-        Resource* const resource =
-            rcpsp_.mutable_resources(rcpsp_.resources_size() - unreads_);
-        for (int i = 0; i < words.size(); ++i) {
-          const int current_capacity = atoi32(words[i]);
-          resource->add_capacity_at(current_capacity);
-          if (current_capacity > resource->max_capacity()) {
-            resource->set_max_capacity(current_capacity);
+        const int resource_index = rcpsp_.resources_size() - unreads_;
+        if (rcpsp_.resources(resource_index).renewable()) {
+          // Renewable resource capacities over the time horizon.
+          CHECK_EQ(words.size(), rcpsp_.horizon());
+          Resource* const resource = rcpsp_.mutable_resources(resource_index);
+          for (int i = 0; i < words.size(); ++i) {
+            const int current_capacity = atoi32(words[i]);
+            resource->add_capacity_at(current_capacity);
+            if (current_capacity > resource->max_capacity()) {
+              resource->set_max_capacity(current_capacity);
+            }
           }
+        } else {
+          // Nonrenewable resource has a time-independent capacity.
+          CHECK_EQ(words.size(), 1);
+          Resource* const resource = rcpsp_.mutable_resources(resource_index);
+          resource->set_max_capacity(atoi32(words[0]));
         }
         unreads_--;
-        if (unreads_ == 0) {
-          load_status_ = PARSING_FINISHED;
-        }
-      } else {
-        ReportError(line);
+      }
+      if (unreads_ == 0) {
+        load_status_ = PARSING_FINISHED;
       }
       break;
     }
