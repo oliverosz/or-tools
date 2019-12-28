@@ -35,8 +35,12 @@ DEFINE_bool(routing_no_relocate, false,
             "Routing: forbids use of Relocate neighborhood.");
 DEFINE_bool(routing_no_relocate_neighbors, true,
             "Routing: forbids use of RelocateNeighbors neighborhood.");
+DEFINE_bool(routing_no_relocate_subtrip, false,
+            "Routing: forbids use of RelocateSubtrips neighborhood.");
 DEFINE_bool(routing_no_exchange, false,
             "Routing: forbids use of Exchange neighborhood.");
+DEFINE_bool(routing_no_exchange_subtrip, false,
+            "Routing: forbids use of ExchangeSubtrips neighborhood.");
 DEFINE_bool(routing_no_cross, false,
             "Routing: forbids use of Cross neighborhood.");
 DEFINE_bool(routing_no_2opt, false,
@@ -97,7 +101,7 @@ DEFINE_double(cheapest_insertion_neighbors_ratio, 1.0,
               "Ratio of nodes considered as neighbors in the "
               "GlobalCheapestInsertion heuristic.");
 DEFINE_bool(routing_dfs, false, "Routing: use a complete depth-first search.");
-DEFINE_int64(routing_optimization_step, 1, "Optimization step.");
+DEFINE_double(routing_optimization_step, 0.0, "Optimization step.");
 DEFINE_int32(routing_number_of_solutions_to_collect, 1,
              "Number of solutions to collect.");
 DEFINE_int32(routing_relocate_expensive_chain_num_arcs_to_consider, 4,
@@ -156,6 +160,7 @@ void SetFirstSolutionStrategyFromFlags(RoutingSearchParameters* parameters) {
   parameters->set_use_unfiltered_first_solution_strategy(
       !FLAGS_routing_use_filtered_first_solutions);
   parameters->set_savings_neighbors_ratio(FLAGS_savings_neighbors_ratio);
+  parameters->set_savings_max_memory_usage_bytes(6e9);
   parameters->set_savings_add_reverse_arcs(FLAGS_savings_add_reverse_arcs);
   parameters->set_savings_arc_coefficient(FLAGS_savings_arc_coefficient);
   parameters->set_cheapest_insertion_farthest_seeds_ratio(
@@ -206,6 +211,10 @@ void AddLocalSearchNeighborhoodOperatorsFromFlags(
       ToOptionalBoolean(!FLAGS_routing_no_relocate));
   local_search_operators->set_use_relocate_neighbors(
       ToOptionalBoolean(!FLAGS_routing_no_relocate_neighbors));
+  local_search_operators->set_use_relocate_subtrip(
+      ToOptionalBoolean(!FLAGS_routing_no_relocate_subtrip));
+  local_search_operators->set_use_exchange_subtrip(
+      ToOptionalBoolean(!FLAGS_routing_no_exchange_subtrip));
   local_search_operators->set_use_exchange(
       ToOptionalBoolean(!FLAGS_routing_no_exchange));
   local_search_operators->set_use_cross(
@@ -244,6 +253,8 @@ void AddLocalSearchNeighborhoodOperatorsFromFlags(
 void SetSearchLimitsFromFlags(RoutingSearchParameters* parameters) {
   CHECK(parameters != nullptr);
   parameters->set_use_depth_first_search(FLAGS_routing_dfs);
+  parameters->set_use_cp(BOOL_TRUE);
+  parameters->set_use_cp_sat(BOOL_FALSE);
   parameters->set_optimization_step(FLAGS_routing_optimization_step);
   parameters->set_number_of_solutions_to_collect(
       FLAGS_routing_number_of_solutions_to_collect);

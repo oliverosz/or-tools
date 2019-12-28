@@ -18,6 +18,7 @@
 #include "ortools/glop/parameters.pb.h"
 #include "ortools/glop/variables_info.h"
 #include "ortools/lp_data/lp_types.h"
+#include "ortools/lp_data/scattered_vector.h"
 #include "ortools/util/stats.h"
 
 namespace operations_research {
@@ -92,12 +93,16 @@ class UpdateRow {
     return DeterministicTimeForFpOperations(num_operations_);
   }
 
+  // This returns the asked unit row left inverse. It temporarily invalidate
+  // the class state by calling Invalidate().
+  const ScatteredRow& ComputeAndGetUnitRowLeftInverse(RowIndex leaving_row);
+
  private:
   // Computes the left inverse of the given unit row, and stores it in
   // unit_row_left_inverse_.
   void ComputeUnitRowLeftInverse(RowIndex leaving_row);
 
-  // ComputeUpdateRow() does the common work and call one of these functions
+  // ComputeUpdateRow() does the common work and calls one of these functions
   // depending on the situation.
   void ComputeUpdatesRowWise();
   void ComputeUpdatesRowWiseHypersparse();

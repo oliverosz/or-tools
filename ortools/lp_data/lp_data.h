@@ -28,9 +28,9 @@
 #include <map>
 #include <string>  // for std::string
 #include <vector>  // for vector
+
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-
 #include "ortools/base/hash.h"
 #include "ortools/base/int_type.h"
 #include "ortools/base/int_type_indexed_vector.h"
@@ -180,7 +180,7 @@ class LinearProgram {
   // modifying the matrix does not change the result of any function in this
   // class until UseTransposeMatrixAsReference() is called. This is because the
   // transpose matrix is only used by GetTransposeSparseMatrix() and this
-  // function will recompute the whole tranpose from the matrix. In particular,
+  // function will recompute the whole transpose from the matrix. In particular,
   // do not call GetTransposeSparseMatrix() while you modify the matrix returned
   // by GetMutableTransposeSparseMatrix() otherwise all your changes will be
   // lost.
@@ -541,6 +541,9 @@ class LinearProgram {
     columns_are_known_to_be_clean_ = true;
   }
 
+  // If true, checks bound validity in debug mode.
+  void SetDcheckBounds(bool dcheck_bounds) { dcheck_bounds_ = dcheck_bounds; }
+
  private:
   // A helper function that updates the vectors integer_variables_list_,
   // binary_variables_list_, and non_binary_variables_list_.
@@ -567,7 +570,7 @@ class LinearProgram {
   SparseMatrix matrix_;
 
   // The transpose of matrix_. This will be lazily recomputed by
-  // GetTransposeSparseMatrix() if tranpose_matrix_is_consistent_ is false.
+  // GetTransposeSparseMatrix() if transpose_matrix_is_consistent_ is false.
   mutable SparseMatrix transpose_matrix_;
 
   // Constraint related quantities.
@@ -627,6 +630,9 @@ class LinearProgram {
   // The index of the first slack variable added to the linear program by
   // LinearProgram::AddSlackVariablesForAllRows().
   ColIndex first_slack_variable_;
+
+  // If true, checks bounds in debug mode.
+  bool dcheck_bounds_ = true;
 
   friend void Scale(LinearProgram* lp, SparseMatrixScaler* scaler,
                     GlopParameters::ScalingAlgorithm scaling_method);

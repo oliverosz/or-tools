@@ -13,10 +13,12 @@
 
 // Minimal example to call the MIP solver.
 // [START program]
+// [START import]
 import com.google.ortools.linearsolver.MPConstraint;
 import com.google.ortools.linearsolver.MPObjective;
 import com.google.ortools.linearsolver.MPSolver;
 import com.google.ortools.linearsolver.MPVariable;
+// [END import]
 
 /** Minimal Mixed Integer Programming example to showcase calling the solver. */
 public class SimpleMipProgram {
@@ -32,7 +34,7 @@ public class SimpleMipProgram {
     // [END solver]
 
     // [START variables]
-    double infinity = MPSolver.infinity();
+    double infinity = java.lang.Double.POSITIVE_INFINITY;
     // x and y are integer non-negative variables.
     MPVariable x = solver.makeIntVar(0.0, infinity, "x");
     MPVariable y = solver.makeIntVar(0.0, infinity, "y");

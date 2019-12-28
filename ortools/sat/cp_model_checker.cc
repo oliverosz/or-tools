@@ -80,14 +80,34 @@ std::string ValidateIntegerVariable(const CpModelProto& model, int v) {
     return absl::StrCat("var #", v, " has and invalid domain() format: ",
                         ProtobufShortDebugString(proto));
   }
+
+  // Internally, we often take the negation of a domain, and we also want to
+  // have sentinel values greater than the min/max of a variable domain, so
+  // the domain must fall in [kint64min + 2, kint64max - 1].
+  const int64 lb = proto.domain(0);
+  const int64 ub = proto.domain(proto.domain_size() - 1);
+  if (lb < kint64min + 2 || ub > kint64max - 1) {
+    return absl::StrCat(
+        "var #", v, " domain do not fall in [kint64min + 2, kint64max - 1]. ",
+        ProtobufShortDebugString(proto));
+  }
+
+  // We do compute ub - lb in some place in the code and do not want to deal
+  // with overflow everywhere. This seems like a reasonable precondition anyway.
+  if (lb < 0 && lb + kint64max < ub) {
+    return absl::StrCat(
+        "var #", v,
+        " has a domain that is too large, i.e. |UB - LB| overflow an int64: ",
+        ProtobufShortDebugString(proto));
+  }
+
   return "";
 }
 
 std::string ValidateArgumentReferencesInConstraint(const CpModelProto& model,
                                                    int c) {
   const ConstraintProto& ct = model.constraints(c);
-  IndexReferences references;
-  AddReferencesUsedByConstraint(ct, &references);
+  IndexReferences references = GetReferencesUsedByConstraint(ct);
   for (const int v : references.variables) {
     if (!VariableReferenceIsValid(model, v)) {
       return absl::StrCat("Out of bound integer variable ", v,
@@ -108,7 +128,7 @@ std::string ValidateArgumentReferencesInConstraint(const CpModelProto& model,
                           ProtobufShortDebugString(ct));
     }
   }
-  for (const int i : references.intervals) {
+  for (const int i : UsedIntervals(ct)) {
     if (i < 0 || i >= model.constraints_size()) {
       return absl::StrCat("Out of bound interval ", i, " in constraint #", c,
                           " : ", ProtobufShortDebugString(ct));
@@ -213,6 +233,20 @@ std::string ValidateObjective(const CpModelProto& model,
   return "";
 }
 
+std::string ValidateSolutionHint(const CpModelProto& model) {
+  if (!model.has_solution_hint()) return "";
+  const auto& hint = model.solution_hint();
+  if (hint.vars().size() != hint.values().size()) {
+    return "Invalid solution hint: vars and values do not have the same size.";
+  }
+  for (const int ref : hint.vars()) {
+    if (!VariableReferenceIsValid(model, ref)) {
+      return absl::StrCat("Invalid variable reference in solution hint: ", ref);
+    }
+  }
+  return "";
+}
+
 }  // namespace
 
 std::string ValidateCpModel(const CpModelProto& model) {
@@ -222,13 +256,23 @@ std::string ValidateCpModel(const CpModelProto& model) {
   for (int c = 0; c < model.constraints_size(); ++c) {
     RETURN_IF_NOT_EMPTY(ValidateArgumentReferencesInConstraint(model, c));
 
+    // By default, a constraint does not support enforcement literals except if
+    // explicitly stated by setting this to true below.
+    bool support_enforcement = false;
+
     // Other non-generic validations.
     // TODO(user): validate all constraints.
-    // TODO(user): Make sure enforcement literals are only set when supported.
     const ConstraintProto& ct = model.constraints(c);
     const ConstraintProto::ConstraintCase type = ct.constraint_case();
     switch (type) {
+      case ConstraintProto::ConstraintCase::kBoolOr:
+        support_enforcement = true;
+        break;
+      case ConstraintProto::ConstraintCase::kBoolAnd:
+        support_enforcement = true;
+        break;
       case ConstraintProto::ConstraintCase::kLinear:
+        support_enforcement = true;
         if (!DomainInProtoIsValid(ct.linear())) {
           return absl::StrCat("Invalid domain in constraint #", c, " : ",
                               ProtobufShortDebugString(ct));
@@ -238,6 +282,9 @@ std::string ValidateCpModel(const CpModelProto& model) {
                               " : ", ProtobufShortDebugString(ct));
         }
         RETURN_IF_NOT_EMPTY(ValidateLinearConstraint(model, ct));
+        break;
+      case ConstraintProto::ConstraintCase::kInterval:
+        support_enforcement = true;
         break;
       case ConstraintProto::ConstraintCase::kCumulative:
         if (ct.cumulative().intervals_size() !=
@@ -256,6 +303,21 @@ std::string ValidateCpModel(const CpModelProto& model) {
       default:
         break;
     }
+
+    // Because some client set fixed enforcement literal which are supported
+    // in the presolve for all constraints, we just check that there is no
+    // non-fixed enforcement.
+    if (!support_enforcement && !ct.enforcement_literal().empty()) {
+      for (const int ref : ct.enforcement_literal()) {
+        const int var = PositiveRef(ref);
+        const Domain domain = ReadDomainFromProto(model.variables(var));
+        if (domain.Size() != 1) {
+          return absl::StrCat(
+              "Enforcement literal not supported in constraint: ",
+              ProtobufShortDebugString(ct));
+        }
+      }
+    }
   }
   if (model.has_objective()) {
     for (const int v : model.objective().vars()) {
@@ -267,6 +329,7 @@ std::string ValidateCpModel(const CpModelProto& model) {
     RETURN_IF_NOT_EMPTY(ValidateObjective(model, model.objective()));
   }
 
+  RETURN_IF_NOT_EMPTY(ValidateSolutionHint(model));
   return "";
 }
 
@@ -420,6 +483,10 @@ class ConstraintChecker {
            Value(interval2.end()) <= Value(interval1.start());
   }
 
+  bool IntervalIsEmpty(const IntervalConstraintProto& interval) {
+    return Value(interval.start()) == Value(interval.end());
+  }
+
   bool NoOverlap2DConstraintIsFeasible(const CpModelProto& model,
                                        const ConstraintProto& ct) {
     const auto& arg = ct.no_overlap_2d();
@@ -434,7 +501,10 @@ class ConstraintChecker {
       for (int i = 0; i < num_intervals; ++i) {
         const ConstraintProto& x = model.constraints(arg.x_intervals(i));
         const ConstraintProto& y = model.constraints(arg.y_intervals(i));
-        if (ConstraintIsEnforced(x) && ConstraintIsEnforced(y)) {
+        if (ConstraintIsEnforced(x) && ConstraintIsEnforced(y) &&
+            (!arg.boxes_with_null_area_can_overlap() ||
+             (!IntervalIsEmpty(x.interval()) &&
+              !IntervalIsEmpty(y.interval())))) {
           enforced_intervals_xy.push_back({&x.interval(), &y.interval()});
         }
       }
@@ -446,7 +516,15 @@ class ConstraintChecker {
         const auto& yi = *enforced_intervals_xy[i].second;
         const auto& xj = *enforced_intervals_xy[j].first;
         const auto& yj = *enforced_intervals_xy[j].second;
-        if (!IntervalsAreDisjoint(xi, xj) && !IntervalsAreDisjoint(yi, yj)) {
+        if (!IntervalsAreDisjoint(xi, xj) && !IntervalsAreDisjoint(yi, yj) &&
+            !IntervalIsEmpty(xi) && !IntervalIsEmpty(xj) &&
+            !IntervalIsEmpty(yi) && !IntervalIsEmpty(yj)) {
+          VLOG(1) << "Interval " << i << "(x=[" << Value(xi.start()) << ", "
+                  << Value(xi.end()) << "], y=[" << Value(yi.start()) << ", "
+                  << Value(yi.end()) << "]) and " << j << "("
+                  << "(x=[" << Value(xj.start()) << ", " << Value(xj.end())
+                  << "], y=[" << Value(yj.start()) << ", " << Value(yj.end())
+                  << "]) are not disjoint.";
           return false;
         }
       }
@@ -456,7 +534,7 @@ class ConstraintChecker {
 
   bool CumulativeConstraintIsFeasible(const CpModelProto& model,
                                       const ConstraintProto& ct) {
-    // TODO(user, fdid): Improve complexity for large durations.
+    // TODO(user,user): Improve complexity for large durations.
     const int64 capacity = Value(ct.cumulative().capacity());
     const int num_intervals = ct.cumulative().intervals_size();
     absl::flat_hash_map<int64, int64> usage;
@@ -497,22 +575,22 @@ class ConstraintChecker {
     return ct.table().negated();
   }
 
-  bool AutomataConstraintIsFeasible(const ConstraintProto& ct) {
+  bool AutomatonConstraintIsFeasible(const ConstraintProto& ct) {
     // Build the transition table {tail, label} -> head.
     absl::flat_hash_map<std::pair<int64, int64>, int64> transition_map;
-    const int num_transitions = ct.automata().transition_tail().size();
+    const int num_transitions = ct.automaton().transition_tail().size();
     for (int i = 0; i < num_transitions; ++i) {
-      transition_map[{ct.automata().transition_tail(i),
-                      ct.automata().transition_label(i)}] =
-          ct.automata().transition_head(i);
+      transition_map[{ct.automaton().transition_tail(i),
+                      ct.automaton().transition_label(i)}] =
+          ct.automaton().transition_head(i);
     }
 
-    // Walk the automata.
-    int64 current_state = ct.automata().starting_state();
-    const int num_steps = ct.automata().vars_size();
+    // Walk the automaton.
+    int64 current_state = ct.automaton().starting_state();
+    const int num_steps = ct.automaton().vars_size();
     for (int i = 0; i < num_steps; ++i) {
       const std::pair<int64, int64> key = {current_state,
-                                           Value(ct.automata().vars(i))};
+                                           Value(ct.automaton().vars(i))};
       if (!gtl::ContainsKey(transition_map, key)) {
         return false;
       }
@@ -520,52 +598,51 @@ class ConstraintChecker {
     }
 
     // Check we are now in a final state.
-    for (const int64 final : ct.automata().final_states()) {
+    for (const int64 final : ct.automaton().final_states()) {
       if (current_state == final) return true;
     }
     return false;
   }
 
   bool CircuitConstraintIsFeasible(const ConstraintProto& ct) {
+    // Compute the set of relevant nodes for the constraint and set the next of
+    // each of them. This also detects duplicate nexts.
     const int num_arcs = ct.circuit().tails_size();
-    std::vector<int> nexts;
-    int first_node = kint32max;
+    absl::flat_hash_set<int> nodes;
+    absl::flat_hash_map<int, int> nexts;
     for (int i = 0; i < num_arcs; ++i) {
       const int tail = ct.circuit().tails(i);
       const int head = ct.circuit().heads(i);
-      first_node = std::min(first_node, std::min(tail, head));
-      const int min_size = std::max(tail, head) + 1;
-      if (min_size > nexts.size()) nexts.resize(min_size, -1);
-
+      nodes.insert(tail);
+      nodes.insert(head);
       if (LiteralIsFalse(ct.circuit().literals(i))) continue;
-
-      if (nexts[tail] != -1) return false;  // duplicate.
+      if (nexts.contains(tail)) return false;  // Duplicate.
       nexts[tail] = head;
     }
 
     // All node must have a next.
-    int in_cycle = -1;
+    int in_cycle;
     int cycle_size = 0;
-    for (int i = first_node; i < nexts.size(); ++i) {
-      if (nexts[i] == -1) return false;
-      if (nexts[i] != i) {
-        in_cycle = i;
-        ++cycle_size;
-      }
+    for (const int node : nodes) {
+      if (!nexts.contains(node)) return false;  // No next.
+      if (nexts[node] == node) continue;        // skip self-loop.
+      in_cycle = node;
+      ++cycle_size;
     }
-
     if (cycle_size == 0) return true;
 
-    // Check that we have only one cycle.
-    std::vector<bool> visited(nexts.size(), false);
+    // Check that we have only one cycle. visited is used to not loop forever if
+    // we have a "rho" shape instead of a cycle.
+    absl::flat_hash_set<int> visited;
     int current = in_cycle;
     int num_visited = 0;
-    while (!visited[current]) {
+    while (!visited.contains(current)) {
       ++num_visited;
-      visited[current] = true;
+      visited.insert(current);
       current = nexts[current];
     }
-    return num_visited == cycle_size;
+    if (current != in_cycle) return false;  // Rho shape.
+    return num_visited == cycle_size;       // Another cycle somewhere if false.
   }
 
   bool RoutesConstraintIsFeasible(const ConstraintProto& ct) {
@@ -782,8 +859,8 @@ bool SolutionIsFeasible(const CpModelProto& model,
       case ConstraintProto::ConstraintCase::kTable:
         is_feasible = checker.TableConstraintIsFeasible(ct);
         break;
-      case ConstraintProto::ConstraintCase::kAutomata:
-        is_feasible = checker.AutomataConstraintIsFeasible(ct);
+      case ConstraintProto::ConstraintCase::kAutomaton:
+        is_feasible = checker.AutomatonConstraintIsFeasible(ct);
         break;
       case ConstraintProto::ConstraintCase::kCircuit:
         is_feasible = checker.CircuitConstraintIsFeasible(ct);

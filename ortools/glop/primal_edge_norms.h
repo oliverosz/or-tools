@@ -20,6 +20,7 @@
 #include "ortools/glop/variables_info.h"
 #include "ortools/lp_data/lp_data.h"
 #include "ortools/lp_data/lp_types.h"
+#include "ortools/lp_data/scattered_vector.h"
 #include "ortools/util/stats.h"
 
 namespace operations_research {
@@ -55,8 +56,7 @@ class PrimalEdgeNorms {
   // Takes references to the linear program data we need. Note that we assume
   // that the matrix will never change in our back, but the other references are
   // supposed to reflect the correct state.
-  PrimalEdgeNorms(const MatrixView& matrix,
-                  const CompactSparseMatrix& compact_matrix,
+  PrimalEdgeNorms(const CompactSparseMatrix& compact_matrix,
                   const VariablesInfo& variables_info,
                   const BasisFactorization& basis_factorization);
 
@@ -162,7 +162,6 @@ class PrimalEdgeNorms {
                           const UpdateRow& update_row);
 
   // Problem data that should be updated from outside.
-  const MatrixView& matrix_;
   const CompactSparseMatrix& compact_matrix_;
   const VariablesInfo& variables_info_;
   const BasisFactorization& basis_factorization_;

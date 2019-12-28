@@ -47,6 +47,7 @@ RoutingSearchParameters DefaultRoutingSearchParameters() {
       "first_solution_strategy: AUTOMATIC "
       "use_unfiltered_first_solution_strategy: false "
       "savings_neighbors_ratio: 1 "
+      "savings_max_memory_usage_bytes: 6e9 "
       "savings_add_reverse_arcs: false "
       "savings_arc_coefficient: 1 "
       "savings_parallel_routes: false "
@@ -56,9 +57,11 @@ RoutingSearchParameters DefaultRoutingSearchParameters() {
       "  use_relocate: BOOL_TRUE"
       "  use_relocate_pair: BOOL_TRUE"
       "  use_light_relocate_pair: BOOL_TRUE"
+      "  use_relocate_subtrip: BOOL_TRUE"
       "  use_relocate_neighbors: BOOL_FALSE"
       "  use_exchange: BOOL_TRUE"
       "  use_exchange_pair: BOOL_TRUE"
+      "  use_exchange_subtrip: BOOL_TRUE"
       "  use_cross: BOOL_TRUE"
       "  use_cross_exchange: BOOL_FALSE"
       "  use_relocate_expensive_chain: BOOL_TRUE"
@@ -82,14 +85,17 @@ RoutingSearchParameters DefaultRoutingSearchParameters() {
       "local_search_metaheuristic: AUTOMATIC "
       "guided_local_search_lambda_coefficient: 0.1 "
       "use_depth_first_search: false "
-      "optimization_step: 1 "
+      "use_cp: BOOL_TRUE "
+      "use_cp_sat: BOOL_FALSE "
+      "optimization_step: 0.0 "
       "number_of_solutions_to_collect: 1 "
       // No "time_limit" by default.
       "solution_limit: 0x7fffffffffffffff "             // kint64max
       "lns_time_limit: { seconds:0 nanos:100000000 } "  // 0.1s
       "use_full_propagation: false "
       "log_search: false "
-      "log_cost_scaling_factor: 1.0";
+      "log_cost_scaling_factor: 1.0 "
+      "log_cost_offset: 0.0";
   RoutingSearchParameters parameters;
   if (!google::protobuf::TextFormat::ParseFromString(kSearchParameters,
                                                      &parameters)) {
@@ -149,6 +155,13 @@ std::string FindErrorInRoutingSearchParameters(
     }
   }
   {
+    const double max_memory =
+        search_parameters.savings_max_memory_usage_bytes();
+    if (std::isnan(max_memory) || max_memory <= 0 || max_memory > 1e10) {
+      return StrCat("Invalid savings_max_memory_usage_bytes: ", max_memory);
+    }
+  }
+  {
     const double coefficient = search_parameters.savings_arc_coefficient();
     if (std::isnan(coefficient) || coefficient <= 0 ||
         std::isinf(coefficient)) {
@@ -186,8 +199,10 @@ std::string FindErrorInRoutingSearchParameters(
     }
   }
   {
-    const int64 step = search_parameters.optimization_step();
-    if (step < 1) return StrCat("Invalid optimization_step:", step);
+    const double step = search_parameters.optimization_step();
+    if (std::isnan(step) || step < 0.0) {
+      return StrCat("Invalid optimization_step: ", step);
+    }
   }
   {
     const int32 num = search_parameters.number_of_solutions_to_collect();
@@ -216,8 +231,15 @@ std::string FindErrorInRoutingSearchParameters(
                   search_parameters.local_search_metaheuristic());
   }
 
-  if (search_parameters.log_cost_scaling_factor() == 0) {
-    return "log_cost_scaling_factor must be non-null";
+  const double scaling_factor = search_parameters.log_cost_scaling_factor();
+  if (scaling_factor == 0 || std::isnan(scaling_factor) ||
+      std::isinf(scaling_factor)) {
+    return StrCat("Invalid value for log_cost_scaling_factor: ",
+                  scaling_factor);
+  }
+  const double offset = search_parameters.log_cost_offset();
+  if (std::isnan(offset) || std::isinf(offset)) {
+    return StrCat("Invalid value for log_cost_offset: ", offset);
   }
 
   return "";  // = Valid (No error).

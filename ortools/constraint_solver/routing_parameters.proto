@@ -16,6 +16,7 @@
 // neighborhoods.
 
 syntax = "proto3";
+
 option java_package = "com.google.ortools.constraintsolver";
 option java_multiple_files = true;
 option csharp_namespace = "Google.OrTools.ConstraintSolver";
@@ -46,6 +47,13 @@ message RoutingSearchParameters {
   // Ratio (in ]0, 1]) of neighbors to consider for each node when constructing
   // the savings. If unspecified, its value is considered to be 1.0.
   double savings_neighbors_ratio = 14;
+  // The number of neighbors considered for each node in the Savings heuristic
+  // is chosen so that the space used to store the savings doesn't exceed
+  // savings_max_memory_usage_bytes, which must be in ]0, 1e10].
+  // NOTE: If both savings_neighbors_ratio and savings_max_memory_usage_bytes
+  // are specified, the number of neighbors considered for each node will be the
+  // minimum of the two numbers determined by these parameters.
+  double savings_max_memory_usage_bytes = 23;
   // Add savings related to reverse arcs when finding the nearest neighbors
   // of the nodes.
   bool savings_add_reverse_arcs = 15;
@@ -70,6 +78,7 @@ message RoutingSearchParameters {
   double cheapest_insertion_neighbors_ratio = 21;
 
   // Local search neighborhood operators used to build a solutions neighborhood.
+  // Next ID: 27
   message LocalSearchNeighborhoodOperators {
     // --- Inter-route operators ---
     // Operator which moves a single node to another position.
@@ -122,6 +131,21 @@ message RoutingSearchParameters {
     // This operator is extremelly useful to move chains of nodes which are
     // located at the same place (for instance nodes part of a same stop).
     OptionalBoolean use_relocate_neighbors = 3;
+    // Relocate neighborhood that moves subpaths all pickup and delivery
+    // pairs have both pickup and delivery inside the subpath or both outside
+    // the subpath. For instance, for given paths:
+    // 0 -> A -> B -> A' -> B' -> 5 -> 6 -> 8
+    // 7 -> 9
+    // Pairs (A,A') and (B,B') are interleaved, so the expected neighbors are:
+    // 0 -> 5 -> A -> B -> A' -> B' -> 6 -> 8
+    // 7 -> 9
+    //
+    // 0 -> 5 -> 6 -> A -> B -> A' -> B' -> 8
+    // 7 -> 9
+    //
+    // 0 -> 5 -> 6 -> 8
+    // 7 -> A -> B -> A' -> B' -> 9
+    OptionalBoolean use_relocate_subtrip = 25;
     // Operator which exchanges the positions of two nodes.
     // Possible neighbors for the path 1 -> 2 -> 3 -> 4 -> 5
     // (where (1, 5) are first and last nodes of the path and can therefore not
@@ -138,6 +162,9 @@ message RoutingSearchParameters {
     // therefore not be moved, and (A, B) and (C,D) are pairs of nodes):
     //   1 -> [C] ->  [D] -> 2 -> 3, 4 -> [A] -> [B] -> 5
     OptionalBoolean use_exchange_pair = 22;
+    // Operator which exchanges subtrips associated to two pairs of nodes,
+    // see use_relocate_subtrip for a definition of subtrips.
+    OptionalBoolean use_exchange_subtrip = 26;
     // Operator which cross exchanges the starting chains of 2 paths, including
     // exchanging the whole paths.
     // First and last nodes are not moved.
@@ -304,9 +331,19 @@ message RoutingSearchParameters {
   // If true, the solver should use depth-first search rather than local search
   // to solve the problem.
   bool use_depth_first_search = 6;
+  // If true, use the CP solver to find a solution. Either local or depth-first
+  // search will be used depending on the value of use_depth_first_search. Will
+  // be run before the CP-SAT solver (cf. use_cp_sat).
+  OptionalBoolean use_cp = 28;
+  // If true, use the CP-SAT solver to find a solution. If use_cp is also true,
+  // the CP-SAT solver will be run after the CP solver if there is time
+  // remaining and will use the CP solution as a hint for the CP-SAT search.
+  // As of 5/2019, only TSP models can be solved.
+  OptionalBoolean use_cp_sat = 27;
   // Minimum step by which the solution must be improved in local search. 0
-  // means "unspecified".
-  int64 optimization_step = 7;
+  // means "unspecified". If this value is fractional, it will get rounded to
+  // the nearest integer.
+  double optimization_step = 7;
   // Number of solutions to collect during the search. Corresponds to the best
   // solutions found during the search. 0 means "unspecified".
   int32 number_of_solutions_to_collect = 17;
@@ -346,8 +383,10 @@ message RoutingSearchParameters {
   // search neighbors accepted, the total memory used and the percentage of the
   // search done.
   bool log_search = 13;
-  // In logs, cost values will be unscaled by this factor.
+  // In logs, cost values will be scaled and offset by the given values in the
+  // following way: log_cost_scaling_factor * (cost + log_cost_offset)
   double log_cost_scaling_factor = 22;
+  double log_cost_offset = 29;
 }
 
 // Parameters which have to be set when creating a RoutingModel.

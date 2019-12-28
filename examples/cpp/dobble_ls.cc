@@ -18,7 +18,7 @@
 // generalized: we have N cards, each with K different symbols, and
 // there are N different symbols overall.
 //
-// This is a feasability problem. We transform that into an
+// This is a feasibility problem. We transform that into an
 // optimization problem where we penalize cards whose intersection is
 // of cardinality different from 1. A feasible solution of the
 // original problem is a solution with a zero cost.
@@ -465,8 +465,8 @@ class DobbleFilter : public IntVarLocalSearchFilter {
   // The LocalSearchFilter::Accept() API also takes a deltadelta,
   // which is the difference between the current delta and the last
   // delta that was given to Accept() -- but we don't use it here.
-  bool Accept(const Assignment* delta,
-              const Assignment* unused_deltadelta) override {
+  bool Accept(const Assignment* delta, const Assignment* unused_deltadelta,
+              int64 objective_min, int64 objective_max) override {
     const Assignment::IntContainer& solution_delta = delta->IntVarContainer();
     const int solution_delta_size = solution_delta.Size();
 
@@ -723,7 +723,7 @@ void SolveDobble(int num_cards, int num_symbols, int num_symbols_per_card) {
   DecisionBuilder* const final_db = solver.MakeLocalSearchPhase(
       all_card_symbol_vars, build_db,
       solver.MakeLocalSearchPhaseParameters(
-          solver.ConcatenateOperators(operators, true),
+          objective_var, solver.ConcatenateOperators(operators, true),
           nullptr,  // Sub decision builder, not needed here.
           nullptr,  // Limit the search for improving move, we will stop
                     // the exploration of the local search at the first
